@@ -419,7 +419,7 @@ class LogicGUI:
         """
          Makes a new thread handling connecting with the other script
         """
-        threading.Thread(target=self.connect()).start()
+        threading.Thread(target=self.connect).start()
 
     def connect(self):
         """
