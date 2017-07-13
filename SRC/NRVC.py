@@ -95,7 +95,7 @@ class Socket:
         :param path: path of the file to send 
         """
         self._other_socket.sendfile(open(path, 'rb'))  # sends the file
-        time.sleep(0.1)  # delays for a while to avoid conflicts with other messages sent from socket
+        time.sleep(0.5)  # delays for a while to avoid conflicts with other messages sent from socket
 
     def recv_file(self, path):
         """
@@ -330,10 +330,12 @@ class Receiver:
         self.current_time = time.time()
         Lock.acquire()
         self._socket.send_msg("pingbk")
+        Lock.release()
 
     def ping(self):
         Lock.acquire()
         self._socket.send_msg("ping")
+        Lock.release()
 
     def ping_respond(self):
         self._socket.ping = (time.time() - self.current_time)
