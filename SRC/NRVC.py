@@ -4,18 +4,28 @@ Network Repository Version Control
 Test project
 
 """
-from watchdog.observers import Observer  # file watcher
-from watchdog.events import *  # file watcher events
-import socket as raw_socket  # networking socket
-import os  # cross-platform operating system library
+try:
+    import watchdog
+except ImportError:
+    import pip
+
+    pip.main(["install", "--user", "watchdog"])
 import filecmp  # file comparing library
+import os  # cross-platform operating system library
 import shutil  # high level file managing library
+import socket as raw_socket  # networking socket
+import threading  # threads managing library
 import time  # time library for adding delays
 import tkinter  # GUI library
-from tkinter import filedialog, messagebox, simpledialog
-import threading  # threads managing library
+import tkinter.scrolledtext
+from tkinter import filedialog, simpledialog
+
+from watchdog.events import *  # file watcher events
+from watchdog.observers import Observer  # file watcher
 
 Lock = threading.Lock()  # a lock for thread managing
+
+end = False
 
 
 class Socket:
@@ -34,7 +44,10 @@ class Socket:
         self.port = self._my_socket.getsockname()[1]  # stores port number
 
         self._other_socket = None  # initialize variables for other socket
-        self._other_addr = None
+        self.ping = 0
+
+    def is_connected(self):
+        return self._other_socket is not None
 
     def accept(self):
         """
@@ -45,7 +58,7 @@ class Socket:
             return False
 
         self._my_socket.listen()
-        self._other_socket, self._other_addr = self._my_socket.accept()
+        self._other_socket, other_addr = self._my_socket.accept()
 
         return True
 
@@ -91,8 +104,8 @@ class Socket:
         
         :param path: path to save file in
         """
-        file = open(path, 'wb')  # open the temp file
-        self._other_socket.settimeout(0.01)  # sets socket timeout for receiving file data
+        file = open(path, 'wb')  # open the file
+        self._other_socket.settimeout(self.ping + 0.01)  # sets socket timeout for receiving file data
         try:  # expecting a time out
             while True:
                 data = self._other_socket.recv(1024)  # receives a kilobyte by kilobyte
@@ -114,16 +127,17 @@ class Socket:
             data += byte
 
 
-class EventHandlerSender(FileSystemEventHandler):
+class SenderEventHandler(FileSystemEventHandler):
     """
     Sub class of EventHandler overriding methods of events and sending commands to the socket
     """
 
-    def __init__(self, _socket):
+    def __init__(self, _socket, gui):
         """
         :param _socket: socket to connect to 
         """
         self.socket = _socket
+        self.gui = gui
         self._method_map = {  # maps type of event to its function
             EVENT_TYPE_MODIFIED: self.on_modified,
             EVENT_TYPE_MOVED: self.on_moved,
@@ -187,7 +201,7 @@ class EventHandlerSender(FileSystemEventHandler):
         executed on any event 
         """
 
-        print(event)
+        self.gui.enter_text(event)
 
 
 class Receiver:
@@ -299,92 +313,136 @@ class Receiver:
         Ends the script
         """
         self._socket.end()
-        exit("\tThe Other Script Ended !\n")
+        print("Terminator signal has been received !")
+        os._exit(0)
+
+    def ender(self):
+        Lock.acquire()
+        if self._socket.is_connected():
+            self._socket.send_msg("end")
+        self._socket.end()
+        os._exit(0)
 
     def main_loop(self):
         """
         The main loop for receiver
         """
         try:
-            print("Network Receiver Started !")
-            while True:
+            while not end:
                 self._map_func[self._socket.recv_msg()]()
         except KeyboardInterrupt:
-            socket.send_msg("end")
-            self._socket.end()
+            self.ender()
 
 
-window = tkinter.Tk()
-window.title("NRVC")
+class LogicGUI:
+    def __init__(self):
 
-window.geometry("{}x{}+{}+{}".format(300, 100, (window.winfo_screenwidth() - 100) // 2,
-                                     (window.winfo_screenheight() - 100) // 2))
-window.withdraw()
+        self._broad = raw_socket.socket(raw_socket.AF_INET, raw_socket.SOCK_DGRAM)
+        self._broad.bind(("", 0))
 
-messagebox.showinfo("NRVC",
-                    "Welcome to Network Repository Version Control Program.\n"
-                    "\n"
-                    "Please , Kindly choose the Folder you want to watch for changes.")
+        self._socket = Socket("", 0)
 
-repo_path = filedialog.askdirectory(title="Directory to Watch", initialdir=os.environ["HOME"])
-if not repo_path:
-    exit()
+        self.gui = tkinter.Tk()
+        self.gui.title("NRVC")
 
+        self.gui.resizable(False, False)
 
-def accept():
-    window.withdraw()
+        self.text = tkinter.scrolledtext.ScrolledText()
+        self.text.pack()
 
-    acception = threading.Thread(target=socket.accept)
-    acception.start()
+        self.text.tag_configure('big', font=('Verdana', 12, 'bold'))
+        self.text.tag_configure("small", font=('Tempus Sans ITC', 8, 'bold'))
 
-    messagebox.showinfo("Waiting for connection",
-                        "Open the script in the other computer. \n"
-                        "Enter the following in order to connect to this script.\n"
-                        "\n"
-                        "Host:{}\n"
-                        "Port:{}\n".format(raw_socket.gethostname(), socket.port))
-    acception.join()
+        welcome = \
+            """Network Repository Version Control\n"""
+        self.text.insert(tkinter.END, welcome, "big")
+        self.text.config(state=tkinter.DISABLED)
 
-    window.quit()
-    window.destroy()
+        self.b1 = tkinter.Button(text="Connect", command=self.to_connect)
+        self.b2 = tkinter.Button(text="Accept Connection", command=self.accept)
+        self.b1.pack()
+        self.b2.pack()
 
+        self.gui.withdraw()
 
-def connect():
-    window.withdraw()
-
-    host = None
-    while not host:
-        host = simpledialog.askstring("NRVC", "Please enter the host of the other script to connect")
-
-        if host is None:
+        global repo_path
+        repo_path = filedialog.askdirectory(title="Folder to watch")
+        if not repo_path:
             exit()
 
-    port = ""
-    while not port.isnumeric():
-        port = simpledialog.askstring("NRVC",
-                                      "Please enter the port of the other script to connect")
-        if port is None:
-            exit()
+        self.gui.deiconify()
 
-    socket.connect(host, int(port))
-    window.quit()
-    window.destroy()
+        self.enter_text("Watching : {}".format(repo_path))
+        self.observer = Observer()
+        self.sender = SenderEventHandler(self._socket, self)
+        self.receiver = Receiver(self._socket)
+
+        self.gui.mainloop()
+        self.receiver.ender()
+
+    def start(self):
+        self.enter_text("Connection Successful !")
+
+        self.enter_text("Observer Starting !")
+
+        self.observer.schedule(self.sender, repo_path, recursive=True)
+        self.observer.start()
+
+        self.enter_text("Receiver Starting !")
+
+        self.receiver.main_loop()
+
+    def to_connect(self):
+        threading.Thread(target=self.connect()).start()
+
+    def connect(self):
+
+        self.b1.destroy()
+        self.b2.destroy()
+        port = ""
+
+        while not port.isnumeric():
+            port = simpledialog.askstring("NRVC", "Enter the key from the other script ")
+            if not port:
+                exit()
+
+        port = int(port)
+
+        self._broad.setsockopt(raw_socket.SOL_SOCKET, raw_socket.SO_BROADCAST, 1)
+
+        msg = "NRVC{}".format(self._socket.port).encode()
+
+        accepting = threading.Thread(target=self._socket.accept)
+        accepting.start()
+        self.enter_text('Waiting for a connection !')
+        while accepting.is_alive():
+            self._broad.sendto(msg, ('<broadcast>', port))
+            time.sleep(0.2)
+        cont = threading.Thread(target=self.start)
+        cont.start()
+
+    def accept(self):
+        self.b1.destroy()
+        self.b2.destroy()
+        self.enter_text("Enter this key in the other script : {}".format(self._broad.getsockname()[1]))
+        cont = threading.Thread(target=self.receive)
+        cont.start()
+
+    def receive(self):
+        while True:
+            data, addr = self._broad.recvfrom(10)
+            data = data.decode()
+            if data[:4] == "NRVC":
+                port = int(data[4:])
+                self._socket.connect(addr[0], port)
+                self.start()
+
+    def enter_text(self, msg):
+        self.text.config(state=tkinter.NORMAL)
+        self.text.insert(tkinter.END, "... {} \n".format(msg), "small")
+        self.text.config(state=tkinter.DISABLED)
 
 
-b_accept = tkinter.Button(text="Wait For Connection", command=accept)
-b_accept.pack()
+repo_path = ""
 
-b_connect = tkinter.Button(text="Connect", command=connect)
-b_connect.pack()
-
-socket = Socket(raw_socket.gethostname(), 0)
-
-window.deiconify()
-window.mainloop()
-
-obs = Observer()
-ev = EventHandlerSender(socket)
-obs.schedule(ev, repo_path, recursive=True)
-obs.start()
-print("Files Observer Started !")
-Receiver(socket).main_loop()
+start = LogicGUI()
