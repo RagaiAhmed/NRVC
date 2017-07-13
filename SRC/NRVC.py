@@ -88,7 +88,7 @@ class Socket:
         """
         :param msg: message to send
         """
-        self._other_socket.send((msg + '\n').encode())  # encode a string with "new line" terminator
+        self._other_socket.send('{}\n'.format(msg).encode())  # encode a string with "new line" terminator
 
     def send_file(self, path):
         """
@@ -210,6 +210,7 @@ class Receiver:
     """
 
     def __init__(self, _socket):
+        self.current_time = 0
         self._socket = _socket
         self._map_func = {"cdir": self.created_dir,
                           "cfile": self.created_file,
@@ -217,13 +218,15 @@ class Receiver:
                           "dfile": self.delete_file,
                           "mov": self.mov,
                           "end": self.end,
-                          "req": self.respond}
+                          "req": self.respond,
+                          "pingbk": self.ping,
+                          "ping": self.ping_respond}
 
     def created_dir(self):
         """
         creates directory
         """
-        src = repo_path + self._socket.recv_msg()
+        src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         os.makedirs(src, exist_ok=True)
 
@@ -237,10 +240,10 @@ class Receiver:
         if the file don't exist
             move the received to the repo
         """
-        path = repo_path + self._socket.recv_msg()
+        path = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
-        os.makedirs(os.path.join('temp', ''), exist_ok=True)  # make a temp folder
-        temp = os.path.join('temp', os.path.basename(path))  # name of to be saved file in temp folder
+        os.makedirs('temp/', exist_ok=True)  # make a temp folder
+        temp = 'temp/{}'.format(os.path.basename(path))  # name of to be saved file in temp folder
         self._socket.recv_file(temp)
 
         if os.path.exists(path):  # if the file exists
@@ -256,7 +259,7 @@ class Receiver:
         """
         delete file 
         """
-        src = repo_path + self._socket.recv_msg()
+        src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         if os.path.exists(src):
             os.remove(src)
@@ -265,7 +268,7 @@ class Receiver:
         """
         delete directory
         """
-        src = repo_path + self._socket.recv_msg()
+        src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         if os.path.exists(src):
             shutil.rmtree(src)
@@ -274,8 +277,8 @@ class Receiver:
         """
         move file from source to destination 
         """
-        src = repo_path + self._socket.recv_msg()
-        dst = repo_path + self._socket.recv_msg()
+        src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
+        dst = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         if os.path.exists(src):
             shutil.move(src, dst)  # if file exists move it
@@ -296,7 +299,7 @@ class Receiver:
         """
         Lock.acquire()
 
-        src = repo_path + self._socket.recv_msg()
+        src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         if os.path.isfile(src):
             self._socket.send_msg("cfile")
@@ -323,10 +326,29 @@ class Receiver:
         self._socket.end()
         os._exit(0)
 
+    def strt_ping(self):
+        self.current_time = time.time()
+        Lock.acquire()
+        self._socket.send_msg("pingbk")
+
+    def ping(self):
+        Lock.acquire()
+        self._socket.send_msg("ping")
+
+    def ping_respond(self):
+        self._socket.ping = (time.time() - self.current_time)
+
+    def pinger(self):
+        while not end:
+            self.strt_ping()
+            time.sleep(10)
+
     def main_loop(self):
         """
         The main loop for receiver
         """
+        pingos = threading.Thread(target=self.pinger)
+        pingos.start()
         try:
             while not end:
                 self._map_func[self._socket.recv_msg()]()
