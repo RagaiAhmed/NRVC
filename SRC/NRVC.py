@@ -5,18 +5,20 @@ Test project
 
 """
 try:
-    import watchdog
-except ImportError:
+    import watchdog  # try to import watchdogs
+except ImportError:  # if not existed install it
     import pip
 
     pip.main(["install", "--user", "watchdog"])
+
 import filecmp  # file comparing library
 import os  # cross-platform operating system library
 import shutil  # high level file managing library
 import socket as raw_socket  # networking socket
 import threading  # threads managing library
 import time  # time library for adding delays
-import tkinter  # GUI library
+# GUI library
+import tkinter
 import tkinter.scrolledtext
 from tkinter import filedialog, simpledialog
 
@@ -24,8 +26,6 @@ from watchdog.events import *  # file watcher events
 from watchdog.observers import Observer  # file watcher
 
 Lock = threading.Lock()  # a lock for thread managing
-
-end = False
 
 
 class Socket:
@@ -44,9 +44,11 @@ class Socket:
         self.port = self._my_socket.getsockname()[1]  # stores port number
 
         self._other_socket = None  # initialize variables for other socket
-        self.ping = 0
 
     def is_connected(self):
+        """
+        :return: True if connected else False
+        """
         return self._other_socket is not None
 
     def accept(self):
@@ -88,35 +90,34 @@ class Socket:
         """
         :param msg: message to send
         """
-        self._other_socket.send('{}\n'.format(msg).encode())  # encode a string with "new line" terminator
+        self._other_socket.send('{}\n'.format(msg).encode())  # encode a string with "new line" at the end
 
     def send_file(self, path):
         """
         :param path: path of the file to send 
         """
         self._other_socket.sendfile(open(path, 'rb'))  # sends the file
-        time.sleep(0.5)  # delays for a while to avoid conflicts with other messages sent from socket
 
-    def recv_file(self, path):
+    def recv_file(self, path, size):
         """
         receive file
         stores it in a path
-        
+
         :param path: path to save file in
+        :param size: size of file in bytes
         """
         file = open(path, 'wb')  # open the file
-        self._other_socket.settimeout(self.ping + 0.01)  # sets socket timeout for receiving file data
-        try:  # expecting a time out
-            while True:
-                data = self._other_socket.recv(1024)  # receives a kilobyte by kilobyte
-                file.write(data)  # writes data to the opened file
-        except raw_socket.timeout:
-            file.close()  # closes the file
-        self._other_socket.settimeout(None)  # returns time out to its default
+
+        while size:
+            data = self._other_socket.recv(size)  # receives in a maximum buffer of size
+            size -= len(data)  # decrease the buffer with the amount of data already received
+            file.write(data)  # writes received data to the opened file
+
+        file.close()  # closes the file
 
     def recv_msg(self):
         """
-        Receives a message ending with a new line terminator
+        Receives a message ending with a new line 
         :return: received message 
         """
         data = ""  # message string
@@ -135,9 +136,10 @@ class SenderEventHandler(FileSystemEventHandler):
     def __init__(self, _socket, gui):
         """
         :param _socket: socket to connect to 
+        :param gui: gui controller of class LogicGUI 
         """
-        self.socket = _socket
-        self.gui = gui
+        self._socket = _socket
+        self._gui = gui
         self._method_map = {  # maps type of event to its function
             EVENT_TYPE_MODIFIED: self.on_modified,
             EVENT_TYPE_MOVED: self.on_moved,
@@ -156,7 +158,7 @@ class SenderEventHandler(FileSystemEventHandler):
         event_type = event.event_type
         self._method_map[event_type](event)
 
-        Lock.release()
+        Lock.release()  # letting other threads send as well
 
     def on_created(self, event):
         """
@@ -164,12 +166,13 @@ class SenderEventHandler(FileSystemEventHandler):
         """
         if os.path.exists(event.src_path):  # if the file still exists
             if event.is_directory:  # if folder
-                self.socket.send_msg("cdir")  # folder create command
-                self.socket.send_msg(event.src_path[len(repo_path):])  # path to create
+                self._socket.send_msg("cdir")  # folder create command
+                self._socket.send_msg(event.src_path[len(repo_path):])  # path to create
             else:  # if a file
-                self.socket.send_msg("cfile")  # file create command
-                self.socket.send_msg(event.src_path[len(repo_path):])  # path of that file
-                self.socket.send_file(event.src_path)  # send the file
+                self._socket.send_msg("cfile")  # file create command
+                self._socket.send_msg(event.src_path[len(repo_path):])  # path of that file
+                self._socket.send_msg(str(os.path.getsize(event.src_path)))  # size of file
+                self._socket.send_file(event.src_path)  # send the file
 
     def on_modified(self, event):
         """
@@ -183,25 +186,25 @@ class SenderEventHandler(FileSystemEventHandler):
         executed when anything is deleted
         """
         if event.is_directory:
-            self.socket.send_msg('ddir')
+            self._socket.send_msg('ddir')
         else:
-            self.socket.send_msg('dfile')
-        self.socket.send_msg(event.src_path[len(repo_path):])
+            self._socket.send_msg('dfile')
+        self._socket.send_msg(event.src_path[len(repo_path):])
 
     def on_moved(self, event):
         """
         executed when anything is moved
         """
-        self.socket.send_msg("mov")
-        self.socket.send_msg(event.src_path[len(repo_path):])
-        self.socket.send_msg(event.dest_path[len(repo_path):])
+        self._socket.send_msg("mov")
+        self._socket.send_msg(event.src_path[len(repo_path):])
+        self._socket.send_msg(event.dest_path[len(repo_path):])
 
     def on_any_event(self, event):
         """
         executed on any event 
         """
 
-        self.gui.enter_text(event)
+        self._gui.enter_text(event)
 
 
 class Receiver:
@@ -210,7 +213,6 @@ class Receiver:
     """
 
     def __init__(self, _socket):
-        self.current_time = 0
         self._socket = _socket
         self._map_func = {"cdir": self.created_dir,
                           "cfile": self.created_file,
@@ -218,14 +220,14 @@ class Receiver:
                           "dfile": self.delete_file,
                           "mov": self.mov,
                           "end": self.end,
-                          "req": self.respond,
-                          "pingbk": self.ping,
-                          "ping": self.ping_respond}
+                          "req": self.respond}
 
     def created_dir(self):
         """
         creates directory
         """
+        # adds repo path to the relative path of directory replacing
+        # \ in windows operating systems to / in unix systems
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         os.makedirs(src, exist_ok=True)
@@ -241,10 +243,10 @@ class Receiver:
             move the received to the repo
         """
         path = (repo_path + self._socket.recv_msg()).replace('\\', '/')
-
+        size = int(self._socket.recv_msg())
         os.makedirs('temp/', exist_ok=True)  # make a temp folder
         temp = 'temp/{}'.format(os.path.basename(path))  # name of to be saved file in temp folder
-        self._socket.recv_file(temp)
+        self._socket.recv_file(temp, size)
 
         if os.path.exists(path):  # if the file exists
             if filecmp.cmp(temp, path):  # compare it
@@ -259,6 +261,8 @@ class Receiver:
         """
         delete file 
         """
+        # adds repo path to the relative path of file replacing
+        # \ in windows operating systems to / in unix systems
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         if os.path.exists(src):
@@ -268,6 +272,8 @@ class Receiver:
         """
         delete directory
         """
+        # adds repo path to the relative path of directory replacing
+        # \ in windows operating systems to / in unix systems
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         if os.path.exists(src):
@@ -277,6 +283,8 @@ class Receiver:
         """
         move file from source to destination 
         """
+        # adds repo path to the relative path replacing
+        # \ in windows operating systems to / in unix systems
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
         dst = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
@@ -286,92 +294,79 @@ class Receiver:
 
             # else request the file
 
-            Lock.acquire()
+            Lock.acquire()  # make sure it is the only thread sending
 
             self._socket.send_msg("req")
             self._socket.send_msg(dst[len(repo_path):])
 
-            Lock.release()
+            Lock.release()  # letting other threads send as well
 
     def respond(self):
         """
         Respond to request by sending file if still exists
         """
-        Lock.acquire()
+        Lock.acquire()  # make sure it is the only thread sending
 
+        # adds repo path to the relative path replacing
+        # \ in windows operating systems to / in unix systems
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
 
         if os.path.isfile(src):
             self._socket.send_msg("cfile")
             self._socket.send_msg(src[len(repo_path):])
+            self._socket.send_msg(os.path.getsize(src))
             self._socket.send_file(src)
         elif os.path.exists(src):
             self._socket.send_msg("cdir")
             self._socket.send_msg(src[len(repo_path):])
 
-        Lock.release()
+        Lock.release()  # letting other threads send as well
 
     def end(self):
         """
         Ends the script
         """
-        self._socket.end()
+        self._socket.end()  # terminates socket
         print("Terminator signal has been received !")
-        os._exit(0)
+        os._exit(0)  # kills the process
 
     def ender(self):
-        Lock.acquire()
-        if self._socket.is_connected():
-            self._socket.send_msg("end")
-        self._socket.end()
-        os._exit(0)
-
-    def strt_ping(self):
-        self.current_time = time.time()
-        Lock.acquire()
-        self._socket.send_msg("pingbk")
-        Lock.release()
-
-    def ping(self):
-        Lock.acquire()
-        self._socket.send_msg("ping")
-        Lock.release()
-
-    def ping_respond(self):
-        self._socket.ping = (time.time() - self.current_time)
-
-    def pinger(self):
-        while not end:
-            self.strt_ping()
-            time.sleep(10)
+        Lock.acquire()  # make sure it is the only sending
+        if self._socket.is_connected():  # if the socket is connected
+            self._socket.send_msg("end")  # tell the other pair to end
+        self._socket.end()  # terminate socket
+        os._exit(0)  # kill process
 
     def main_loop(self):
         """
         The main loop for receiver
         """
-        pingos = threading.Thread(target=self.pinger)
-        pingos.start()
         try:
-            while not end:
-                self._map_func[self._socket.recv_msg()]()
+            while True:
+                self._map_func[self._socket.recv_msg()]()  # maps received command to it's function
         except KeyboardInterrupt:
             self.ender()
 
 
 class LogicGUI:
+    """
+    A full completed logic handles all previous classes and interaction with the user
+    """
+
     def __init__(self):
 
+        #  makes a broadcasting socket for discovery and connection purposes
         self._broad = raw_socket.socket(raw_socket.AF_INET, raw_socket.SOCK_DGRAM)
-        self._broad.bind(("", 0))
+        self._broad.bind(("", 0))  # binds it with the current host and any available port
 
-        self._socket = Socket("", 0)
+        self._socket = Socket("", 0)  # makes a socket for data transfere
 
-        self.gui = tkinter.Tk()
+        self.gui = tkinter.Tk()  # GUI window
         self.gui.title("NRVC")
 
         self.gui.resizable(False, False)
 
-        self.text = tkinter.scrolledtext.ScrolledText()
+        self.text = tkinter.scrolledtext.ScrolledText()  # a scrollable text box
         self.text.pack()
 
         self.text.tag_configure('big', font=('Verdana', 12, 'bold'))
@@ -380,51 +375,62 @@ class LogicGUI:
         welcome = \
             """Network Repository Version Control\n"""
         self.text.insert(tkinter.END, welcome, "big")
-        self.text.config(state=tkinter.DISABLED)
+        self.text.config(state=tkinter.DISABLED)  # disabled means READONLY
 
         self.b1 = tkinter.Button(text="Connect", command=self.to_connect)
         self.b2 = tkinter.Button(text="Accept Connection", command=self.accept)
         self.b1.pack()
         self.b2.pack()
 
-        self.gui.withdraw()
+        self.gui.withdraw()  # just hides the main window
 
         global repo_path
-        repo_path = filedialog.askdirectory(title="Folder to watch")
-        if not repo_path:
+        repo_path = filedialog.askdirectory(title="Folder To Watch")  # asks for directory to watch
+        if not repo_path:  # if he closed the window exit
             exit()
 
-        self.gui.deiconify()
+        self.gui.deiconify()  # un hide main window
 
-        self.enter_text("Watching : {}".format(repo_path))
-        self.observer = Observer()
-        self.sender = SenderEventHandler(self._socket, self)
-        self.receiver = Receiver(self._socket)
+        self.enter_text("Watching : {}".format(repo_path))  # tells you what directory you are watching
 
-        self.gui.mainloop()
-        self.receiver.ender()
+        self.observer = Observer()  # declares observer
+        self.sender = SenderEventHandler(self._socket, self)  # declares sender
+        self.receiver = Receiver(self._socket)  # declares receiver
+
+        self.gui.mainloop()  # enter the window mainloop
+        self.receiver.ender()  # if the mainloop exited end the script
 
     def start(self):
+        """
+        Starting the observer, sender and receiver and such
+        """
         self.enter_text("Connection Successful !")
 
         self.enter_text("Observer Starting !")
 
         self.observer.schedule(self.sender, repo_path, recursive=True)
-        self.observer.start()
+        self.observer.start()  # starts a new thread observing repo path
 
         self.enter_text("Receiver Starting !")
 
-        self.receiver.main_loop()
+        self.receiver.main_loop()  # enters the receiver main loop
 
     def to_connect(self):
+        """
+         Makes a new thread handling connecting with the other script
+        """
         threading.Thread(target=self.connect()).start()
 
     def connect(self):
-
+        """
+        in case of connecting the function handles connecting to another script
+        """
+        # destroy the choosing buttons
         self.b1.destroy()
         self.b2.destroy()
-        port = ""
 
+        # gets port of the broadcast listening socket of the other script to send to
+        port = ""
         while not port.isnumeric():
             port = simpledialog.askstring("NRVC", "Enter the key from the other script ")
             if not port:
@@ -432,41 +438,56 @@ class LogicGUI:
 
         port = int(port)
 
-        self._broad.setsockopt(raw_socket.SOL_SOCKET, raw_socket.SO_BROADCAST, 1)
+        self._broad.setsockopt(raw_socket.SOL_SOCKET, raw_socket.SO_BROADCAST, 1)  # getting socket ready for sending
 
+        # a Hello message holding the main socket port number totally hidden from user
         msg = "NRVC{}".format(self._socket.port).encode()
 
+        # thread handling receiving connections
         accepting = threading.Thread(target=self._socket.accept)
         accepting.start()
-        self.enter_text('Waiting for a connection !')
-        while accepting.is_alive():
+        self.enter_text('Trying To Connect !')
+        while accepting.is_alive():  # since there is no connections continue broadcasting
             self._broad.sendto(msg, ('<broadcast>', port))
-            time.sleep(0.2)
-        cont = threading.Thread(target=self.start)
-        cont.start()
+            time.sleep(0.2)  # in a specific interval
+        self.start()
 
     def accept(self):
+        """
+        Receives broadcast message on a specific port 
+        and gets information to connect to the other script 
+        """
+        # destroy choose buttons
         self.b1.destroy()
         self.b2.destroy()
+        # shows the port of the broadcasting socket as a key to get a broadcast message to
         self.enter_text("Enter this key in the other script : {}".format(self._broad.getsockname()[1]))
+        # a new thread for handling the receiving  , leaving the mainloop thread to continue handling gui
         cont = threading.Thread(target=self.receive)
         cont.start()
 
     def receive(self):
+        """
+            Receives broadcast messages on a specific port
+        """
         while True:
-            data, addr = self._broad.recvfrom(10)
+            data, addr = self._broad.recvfrom(10)  # receives 10 bytes from an address
             data = data.decode()
-            if data[:4] == "NRVC":
-                port = int(data[4:])
-                self._socket.connect(addr[0], port)
+            if data[:4] == "NRVC":  # to avoid being interfered with other things
+                port = int(data[4:])  # the port number of the other script main socket
+                self._socket.connect(addr[0], port)  # connect our socket to the other socket
                 self.start()
 
     def enter_text(self, msg):
+        """
+        adds a new line of information to the visible text box for the user
+        :param msg:  message to add
+        """
         self.text.config(state=tkinter.NORMAL)
         self.text.insert(tkinter.END, "... {} \n".format(msg), "small")
         self.text.config(state=tkinter.DISABLED)
 
 
-repo_path = ""
+repo_path = ""  # the supposed to be repository path
 
-start = LogicGUI()
+start = LogicGUI()  # start
