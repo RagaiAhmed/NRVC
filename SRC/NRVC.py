@@ -377,7 +377,7 @@ class LogicGUI:
         self.text.insert(tkinter.END, welcome, "big")
         self.text.config(state=tkinter.DISABLED)  # disabled means READONLY
 
-        self.b1 = tkinter.Button(text="Connect", command=self.to_connect)
+        self.b1 = tkinter.Button(text="Connect", command=self.connect)
         self.b2 = tkinter.Button(text="Accept Connection", command=self.accept)
         self.b1.pack()
         self.b2.pack()
@@ -415,12 +415,6 @@ class LogicGUI:
 
         self.receiver.main_loop()  # enters the receiver main loop
 
-    def to_connect(self):
-        """
-         Makes a new thread handling connecting with the other script
-        """
-        threading.Thread(target=self.connect).start()
-
     def connect(self):
         """
         in case of connecting the function handles connecting to another script
@@ -450,7 +444,8 @@ class LogicGUI:
         while accepting.is_alive():  # since there is no connections continue broadcasting
             self._broad.sendto(msg, ('<broadcast>', port))
             time.sleep(0.2)  # in a specific interval
-        self.start()
+        cont = threading.Thread(target=self.start)
+        cont.start()
 
     def accept(self):
         """
