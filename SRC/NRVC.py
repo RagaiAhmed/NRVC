@@ -144,7 +144,7 @@ class Socket:
             to_recieve -= len(data)  # subtracts from the number of bytes to receive the already received bytes
             msg.append(data)
             # forms a whole binary line representing message then decoding it
-        return "".encode().join(msg).decode()
+        return b"".join(msg).decode()
 
 
 class SenderEventHandler(FileSystemEventHandler):
