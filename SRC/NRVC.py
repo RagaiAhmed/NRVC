@@ -92,9 +92,7 @@ class Socket:
         """
         :param msg: message to send
         """
-        encoded = str(msg).encode()
-        self._other_socket.send('{}\n'.format(len(encoded)).encode())  # sends length of message
-        self._other_socket.send(encoded)  # send the message
+        self._other_socket.send('{}\n'.format(msg).encode())  # send the message
 
     def send_file(self, path):
         """
@@ -126,25 +124,15 @@ class Socket:
         Receives a message 
         :return: received message 
         """
-        msg_len = []  # a list holding each digit in number representing message to be received length
-
-        while True:
-            digit = self._other_socket.recv(1).decode()  # decode the digit received
-            if digit == "\n":  # if we reached message terminator
-                break
-            msg_len.append(digit)
-
-        to_recieve = int("".join(msg_len))  # joins each digit to make a number then make it an integer
-
         msg = []  # list of bytes holding the messages
 
-        while to_recieve:  # while there are bytes to receive
+        while True:
             # store data received in maximum buffer of the length of the message
-            data = self._other_socket.recv(to_recieve)
-            to_recieve -= len(data)  # subtracts from the number of bytes to receive the already received bytes
+            data = self._other_socket.recv(1)
+            if data == b"\n":
+                # forms a whole binary line representing message then decoding it
+                return b"".join(msg).decode()
             msg.append(data)
-            # forms a whole binary line representing message then decoding it
-        return b"".join(msg).decode()
 
 
 class SenderEventHandler(FileSystemEventHandler):
@@ -246,8 +234,10 @@ class Receiver:
         Called once at the start of the sync and receives the path to sync
         """
         # takes path and replaces \ in windows systems to / in unix systems
+        Lock.acquire()
         path = (repo_path + self._socket.recv_msg()).replace("\\", "/")
         self.sync(path)
+        Lock.release()
 
     def sync(self, path):
         """
@@ -345,8 +335,10 @@ class Receiver:
 
         # adds repo path to the relative path replacing
         # \ in windows operating systems to / in unix systems
+        Lock.acquire()
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
         self.send(src)
+        Lock.release()
 
     def send(self, src):
         """
@@ -355,8 +347,6 @@ class Receiver:
         :return: True if directory | False if file |  None if does not exist
         """
         directory = None
-
-        Lock.acquire()  # make sure it is the only thread sending
 
         if os.path.isfile(src):
             self._socket.send_msg("cfile")
@@ -367,8 +357,6 @@ class Receiver:
             self._socket.send_msg("cdir")
             self._socket.send_msg(src[len(repo_path):])
             directory = True
-
-        Lock.release()  # letting other threads send as well
 
         return directory
 
@@ -391,11 +379,8 @@ class Receiver:
         """
         The main loop for receiver
         """
-        try:
-            while True:
-                self._map_func[self._socket.recv_msg()]()  # maps received command to it's function
-        except KeyboardInterrupt:
-            self.ender()
+        while True:
+            self._map_func[self._socket.recv_msg()]()  # maps received command to it's function
 
 
 class LogicGUI:
@@ -543,7 +528,7 @@ class LogicGUI:
         while not path_to_sync.startswith(repo_path):  # if the path to sync is not in the repo path
             self.enter_text("Please choose the directory inside the repo to Sync")
             path_to_sync = filedialog.askdirectory(title="Path to sync", initialdir=repo_path)
-            if path_to_sync is None:
+            if path_to_sync == "":
                 return
         # another check step
         if simpledialog.messagebox.askquestion("NRVC", "Are you sure you want to sync this path ?\n"
@@ -555,5 +540,7 @@ class LogicGUI:
 
 
 repo_path = ""  # the supposed to be repository path
-
-start = LogicGUI()  # start
+try:
+    start = LogicGUI()  # start
+except KeyboardInterrupt:
+    start.receiver.ender()
