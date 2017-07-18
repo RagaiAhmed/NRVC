@@ -123,16 +123,28 @@ class Socket:
 
     def recv_msg(self):
         """
-        Receives a message ending with a new line 
+        Receives a message 
         :return: received message 
         """
-        msg_len = ""  # message length as a string
+        msg_len = []  # a list holding each digit in number representing message to be received length
+
         while True:
-            byte = self._other_socket.recv(1).decode()  # decode the byte received
-            if byte == "\n":  # if we reached message terminator
+            digit = self._other_socket.recv(1).decode()  # decode the digit received
+            if digit == "\n":  # if we reached message terminator
                 break
-            msg_len += byte
-        return self._other_socket.recv(int(msg_len)).decode()  # gets the full message
+            msg_len.append(digit)
+
+        to_recieve = int("".join(msg_len))  # joins each digit to make a number then make it an integer
+
+        msg = []  # list of bytes holding the messages
+
+        while to_recieve:  # while there are bytes to receive
+            # store data received in maximum buffer of the length of the message
+            data = self._other_socket.recv(to_recieve)
+            to_recieve -= len(data)  # subtracts from the number of bytes to receive the already received bytes
+            msg.append(data)
+            # forms a whole binary line representing message then decoding it
+        return "".encode().join(msg).decode()
 
 
 class SenderEventHandler(FileSystemEventHandler):
