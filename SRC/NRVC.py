@@ -92,22 +92,26 @@ class Socket:
         """
         :param msg: message to send
         """
-        self._other_socket.send('{}\n'.format(msg).encode())  # encode a string with "new line" at the end
+        encoded = str(msg).encode()
+        self._other_socket.send('{}\n'.format(len(encoded)).encode())  # sends length of message
+        self._other_socket.send(encoded)  # send the message
 
     def send_file(self, path):
         """
         :param path: path of the file to send 
         """
+        self.send_msg(str(os.path.getsize(path)))  # sends file size
         self._other_socket.sendfile(open(path, 'rb'))  # sends the file
 
-    def recv_file(self, path, size):
+    def recv_file(self, path):
         """
-        receive file
+        file size
         stores it in a path
 
         :param path: path to save file in
-        :param size: size of file in bytes
         """
+        size = int(self.recv_msg())  # takes size of file
+
         file = open(path, 'wb')  # open the file
 
         while size:
@@ -122,12 +126,13 @@ class Socket:
         Receives a message ending with a new line 
         :return: received message 
         """
-        data = ""  # message string
+        msg_len = ""  # message length as a string
         while True:
             byte = self._other_socket.recv(1).decode()  # decode the byte received
             if byte == "\n":  # if we reached message terminator
-                return data  # return received message
-            data += byte
+                break
+            msg_len += byte
+        return self._other_socket.recv(int(msg_len)).decode()  # gets the full message
 
 
 class SenderEventHandler(FileSystemEventHandler):
@@ -173,7 +178,6 @@ class SenderEventHandler(FileSystemEventHandler):
             else:  # if a file
                 self._socket.send_msg("cfile")  # file create command
                 self._socket.send_msg(event.src_path[len(repo_path):])  # path of that file
-                self._socket.send_msg(str(os.path.getsize(event.src_path)))  # size of file
                 self._socket.send_file(event.src_path)  # send the file
 
     def on_modified(self, event):
@@ -265,10 +269,9 @@ class Receiver:
             move the received to the repo
         """
         path = (repo_path + self._socket.recv_msg()).replace('\\', '/')  # receives path
-        size = int(self._socket.recv_msg())  # and takes size of file
 
         fd, temp = tempfile.mkstemp()  # makes a temporary file
-        self._socket.recv_file(fd, size)  # saves in that temporary file the data received
+        self._socket.recv_file(fd)  # saves in that temporary file the data received
 
         if os.path.exists(path):  # if the file exists in repo
             if filecmp.cmp(temp, path):  # compare it
@@ -346,7 +349,6 @@ class Receiver:
         if os.path.isfile(src):
             self._socket.send_msg("cfile")
             self._socket.send_msg(src[len(repo_path):])
-            self._socket.send_msg(os.path.getsize(src))
             self._socket.send_file(src)
             directory = False
         elif os.path.exists(src):
