@@ -22,6 +22,8 @@ import tkinter
 import tkinter.scrolledtext
 from tkinter import filedialog, simpledialog
 
+import tempfile  # library for making temporary files
+
 from watchdog.events import *  # file watcher events
 from watchdog.observers import Observer  # file watcher
 
@@ -242,13 +244,13 @@ class Receiver:
         if the file don't exist
             move the received to the repo
         """
-        path = (repo_path + self._socket.recv_msg()).replace('\\', '/')
-        size = int(self._socket.recv_msg())
-        os.makedirs('temp/', exist_ok=True)  # make a temp folder
-        temp = 'temp/{}'.format(os.path.basename(path))  # name of to be saved file in temp folder
-        self._socket.recv_file(temp, size)
+        path = (repo_path + self._socket.recv_msg()).replace('\\', '/')  # receives path
+        size = int(self._socket.recv_msg())  # and takes size of file
 
-        if os.path.exists(path):  # if the file exists
+        fd, temp = tempfile.mkstemp()  # makes a temporary file
+        self._socket.recv_file(fd, size)  # saves in that temporary file the data received
+
+        if os.path.exists(path):  # if the file exists in repo
             if filecmp.cmp(temp, path):  # compare it
                 os.remove(temp)  # if equal remove the temp and exit
                 return
