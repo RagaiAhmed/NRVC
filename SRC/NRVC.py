@@ -222,7 +222,27 @@ class Receiver:
                           "dfile": self.delete_file,
                           "mov": self.mov,
                           "end": self.end,
-                          "req": self.respond}
+                          "req": self.respond,
+                          "sync": self.pre_sync}
+
+    def pre_sync(self):
+        """
+        Called once at the start of the sync and receives the path to sync
+        """
+        # takes path and replaces \ in windows systems to / in unix systems
+        path = (repo_path + self._socket.recv_msg()).replace("\\", "/")
+        self.sync(path)
+
+    def sync(self, path):
+        """
+        Gets every file and directory in path and sends it back 
+        and if a directory gets all things inside it as well in a recurring process
+        :param path: path to fetch and send
+        """
+        for i in os.listdir(path):
+            src = os.path.join(path, i)
+            if self.send(src):
+                self.sync(src)
 
     def created_dir(self):
         """
@@ -236,7 +256,7 @@ class Receiver:
 
     def created_file(self):
         """
-        makes a directory for temp file 
+        makes a temp file 
         receives file and stores it in temp
         if the file exists in the repo 
             if the file is the same with the received 
@@ -307,22 +327,36 @@ class Receiver:
         """
         Respond to request by sending file if still exists
         """
-        Lock.acquire()  # make sure it is the only thread sending
 
         # adds repo path to the relative path replacing
         # \ in windows operating systems to / in unix systems
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
+        self.send(src)
+
+    def send(self, src):
+        """
+        Sends a file or a directory from its source path
+        :param src: the path of file or directory to send
+        :return: True if directory | False if file |  None if does not exist
+        """
+        directory = None
+
+        Lock.acquire()  # make sure it is the only thread sending
 
         if os.path.isfile(src):
             self._socket.send_msg("cfile")
             self._socket.send_msg(src[len(repo_path):])
             self._socket.send_msg(os.path.getsize(src))
             self._socket.send_file(src)
+            directory = False
         elif os.path.exists(src):
             self._socket.send_msg("cdir")
             self._socket.send_msg(src[len(repo_path):])
+            directory = True
 
         Lock.release()  # letting other threads send as well
+
+        return directory
 
     def end(self):
         """
@@ -408,6 +442,8 @@ class LogicGUI:
         """
         self.enter_text("Connection Successful !")
 
+        tkinter.Button(text="Sync", command=self.sync_req).pack()  # makes a sync button
+
         self.enter_text("Observer Starting !")
 
         self.observer.schedule(self.sender, repo_path, recursive=True)
@@ -470,7 +506,7 @@ class LogicGUI:
         while True:
             data, addr = self._broad.recvfrom(10)  # receives 10 bytes from an address
             data = data.decode()
-            if data[:4] == "NRVC":  # to avoid being interfered with other things
+            if data[:4] == "NRVC":  # to avoid being interfered with other messages
                 port = int(data[4:])  # the port number of the other script main socket
                 self._socket.connect(addr[0], port)  # connect our socket to the other socket
                 self.start()
@@ -483,6 +519,25 @@ class LogicGUI:
         self.text.config(state=tkinter.NORMAL)
         self.text.insert(tkinter.END, "... {} \n".format(msg), "small")
         self.text.config(state=tkinter.DISABLED)
+
+    def sync_req(self):
+        """
+        Called when you hit sync button 
+        """
+        path_to_sync = ""
+
+        while not path_to_sync.startswith(repo_path):  # if the path to sync is not in the repo path
+            self.enter_text("Please choose the directory inside the repo to Sync")
+            path_to_sync = filedialog.askdirectory(title="Path to sync", initialdir=repo_path)
+            if path_to_sync is None:
+                return
+        # another check step
+        if simpledialog.messagebox.askquestion("NRVC", "Are you sure you want to sync this path ?\n"
+                                                       "Note that any conflicts will be overwritten."):
+            Lock.acquire()
+            self._socket.send_msg("sync")
+            self._socket.send_msg(path_to_sync[len(repo_path):])
+            Lock.release()
 
 
 repo_path = ""  # the supposed to be repository path
