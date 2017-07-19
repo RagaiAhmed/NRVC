@@ -218,8 +218,9 @@ class Receiver:
     Receiver class holding all commands receiving functions and logic
     """
 
-    def __init__(self, _socket):
+    def __init__(self, _socket, _gui):
         self._socket = _socket
+        self._gui = _gui
         self._map_func = {"cdir": self.created_dir,
                           "cfile": self.created_file,
                           "ddir": self.delete_dir,
@@ -234,6 +235,7 @@ class Receiver:
         Called once at the start of the sync and receives the path to sync
         """
         # takes path and replaces \ in windows systems to / in unix systems
+        self._gui.enter_text("A sync request received !")
         Lock.acquire()
         path = (repo_path + self._socket.recv_msg()).replace("\\", "/")
         self.sync(path)
@@ -335,6 +337,7 @@ class Receiver:
 
         # adds repo path to the relative path replacing
         # \ in windows operating systems to / in unix systems
+        self._gui.enter_text("A File request received !")
         Lock.acquire()
         src = (repo_path + self._socket.recv_msg()).replace('\\', '/')
         self.send(src)
@@ -347,6 +350,7 @@ class Receiver:
         :return: True if directory | False if file |  None if does not exist
         """
         directory = None
+        self._gui.enter_text("Sending : {}".format(src))
 
         if os.path.isfile(src):
             self._socket.send_msg("cfile")
@@ -357,7 +361,7 @@ class Receiver:
             self._socket.send_msg("cdir")
             self._socket.send_msg(src[len(repo_path):])
             directory = True
-
+        self._gui.enter_text("Sending Successful.")
         return directory
 
     def end(self):
@@ -430,8 +434,9 @@ class LogicGUI:
 
         self.observer = Observer()  # declares observer
         self.sender = SenderEventHandler(self._socket, self)  # declares sender
-        self.receiver = Receiver(self._socket)  # declares receiver
+        self.receiver = Receiver(self._socket, self)  # declares receiver
 
+    def mainloop(self):
         self.gui.mainloop()  # enter the window mainloop
         self.receiver.ender()  # if the mainloop exited end the script
 
@@ -536,11 +541,13 @@ class LogicGUI:
             Lock.acquire()
             self._socket.send_msg("sync")
             self._socket.send_msg(path_to_sync[len(repo_path):])
+            self.enter_text("Sync requested !")
             Lock.release()
 
 
 repo_path = ""  # the supposed to be repository path
+start = LogicGUI()
 try:
-    start = LogicGUI()  # start
+    start.mainloop()  # start
 except KeyboardInterrupt:
     start.receiver.ender()
