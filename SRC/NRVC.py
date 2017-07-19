@@ -92,7 +92,7 @@ class Socket:
         """
         :param msg: message to send
         """
-        self._other_socket.send('{}\n'.format(msg).encode())  # send the message
+        self._other_socket.sendall('{}\n'.format(msg).encode())  # send the message
 
     def send_file(self, path):
         """
@@ -127,7 +127,7 @@ class Socket:
         msg = []  # list of bytes holding the messages
 
         while True:
-            # store data received in maximum buffer of the length of the message
+            # store data received byte by byte as it is a short message
             data = self._other_socket.recv(1)
             if data == b"\n":
                 # forms a whole binary line representing message then decoding it
@@ -551,3 +551,5 @@ try:
     start.mainloop()  # start
 except KeyboardInterrupt:
     start.receiver.ender()
+
+raw_socket.socket.sendall()
