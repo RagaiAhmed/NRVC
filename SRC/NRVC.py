@@ -551,5 +551,3 @@ try:
     start.mainloop()  # start
 except KeyboardInterrupt:
     start.receiver.ender()
-
-raw_socket.socket.sendall()
