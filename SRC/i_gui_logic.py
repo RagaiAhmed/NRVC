@@ -56,12 +56,12 @@ class LogicGUI:
         self.enter_text("Watching : {}".format(self.repo_path))  # tells you what directory you are watching
 
         self.observer = Observer()  # declares observer
-        self.sender = SenderEventHandler(self._socket, self)  # declares sender
+        self.sender = SenderEventHandler(self._socket, self, self.lock, self.repo_path)  # declares sender
         self.receiver = Receiver(self._socket, self, self.repo_path, self.lock)  # declares receiver
 
     def mainloop(self):
         self.gui.mainloop()  # enter the window mainloop
-        self.receiver.ender()  # if the mainloop exited end the script
+        self.end()  # if the mainloop exited end the script
 
     def start(self):
         """
@@ -155,7 +155,7 @@ class LogicGUI:
 
         while not path_to_sync.startswith(self.repo_path):  # if the path to sync is not in the repo path
             self.enter_text("Please choose the directory inside the repo to Sync")
-            path_to_sync = filedialog.askdirectory(title="Path to sync", initialdir=repo_path)
+            path_to_sync = filedialog.askdirectory(title="Path to sync", initialdir=self.repo_path)
             if path_to_sync == "":
                 return
         # another check step
